@@ -1,0 +1,62 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: Install Apache and mod_ssl
+      yum:
+        name:
+          - httpd
+          - mod_ssl
+        state: present
+
+    - name: Create self-signed SSL certificate
+      shell: |
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout /etc/pki/tls/private/apache-selfsigned.key \
+        -out /etc/pki/tls/certs/apache-selfsigned.crt \
+        -subj "/C=US/ST=State/L=City/O=Organization/OU=OrganizationalUnit/CN=example.com"
+      args:
+        creates: /etc/pki/tls/certs/apache-selfsigned.crt
+
+    - name: Set up Apache SSL configuration
+      blockinfile:
+        path: /etc/httpd/conf.d/ssl.conf
+        block: |
+          <VirtualHost *:443>
+              DocumentRoot "/var/www/html"
+              ServerName example.com
+              SSLEngine on
+              SSLCertificateFile /etc/pki/tls/certs/apache-selfsigned.crt
+              SSLCertificateKeyFile /etc/pki/tls/private/apache-selfsigned.key
+          </VirtualHost>
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+
+    - name: Create index.html
+      copy:
+        content: |
+          <html>
+          <head>
+          <title>Hello World</title>
+          </head>
+          <body>
+          <h1>Hello World!</h1>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        mode: '0644'
+
+    - name: Set up HTTP to HTTPS redirection
+      blockinfile:
+        path: /etc/httpd/conf/httpd.conf
+        block: |
+          <VirtualHost *:80>
+              DocumentRoot "/var/www/html"
+              Redirect "/" "https://{{ ansible_default_ipv4.address }}/"
+          </VirtualHost>
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+
+    - name: Ensure Apache is running and enabled
+      service:
+        name: httpd
+        state: started
+        enabled: yes
